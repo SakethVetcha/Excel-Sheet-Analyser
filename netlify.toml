@@ -1,13 +1,18 @@
 [build]
+  command = "npm install && pip install -r requirements.txt"
   functions = "netlify/functions"
   publish = "."
+
+[[plugins]]
+package = "@netlify/plugin-python"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [build.environment]
-  AWS_LAMBDA_JS_RUNTIME = "nodejs18.x"
+  PYTHON_VERSION = "3.9"
+  NODE_VERSION = "18"
 
 [[redirects]]
   from = "/*"

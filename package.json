@@ -7,7 +7,8 @@
     "build": "pip install -r requirements.txt"
   },
   "dependencies": {
-    "@netlify/functions": "^2.0.0"
+    "@netlify/functions": "^2.0.0",
+    "@netlify/plugin-python": "^1.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
