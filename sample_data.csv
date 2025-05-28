@@ -1,0 +1,33 @@
+Date,Product,Category,Sales,Quantity,Price
+2023-01-01,Wireless Earbuds,Electronics,129.99,1,129.99
+2023-01-02,Yoga Mat,Sports & Fitness,24.99,2,12.50
+2023-01-02,Smart Watch,Electronics,199.99,1,199.99
+2023-01-03,Phone Case,Accessories,15.99,3,5.33
+2023-01-03,Laptop Stand,Office Products,29.99,2,15.00
+2023-01-04,Gaming Mouse,Electronics,49.99,1,49.99
+2023-01-05,Water Bottle,Sports & Fitness,19.99,4,5.00
+2023-02-01,Wireless Earbuds,Electronics,129.99,2,129.99
+2023-02-02,Desk Lamp,Home & Kitchen,34.99,3,11.66
+2023-02-03,Bluetooth Speaker,Electronics,79.99,2,40.00
+2023-02-04,Resistance Bands,Sports & Fitness,18.99,5,3.80
+2023-02-05,Keyboard,Electronics,89.99,1,89.99
+2023-03-01,Smart Watch,Electronics,199.99,2,199.99
+2023-03-02,Yoga Mat,Sports & Fitness,24.99,3,12.50
+2023-03-03,Phone Case,Accessories,15.99,4,5.33
+2023-03-04,Coffee Maker,Home & Kitchen,89.99,1,89.99
+2023-03-05,Gaming Headset,Electronics,69.99,2,35.00
+2023-04-01,Wireless Mouse,Electronics,29.99,3,10.00
+2023-04-02,Fitness Tracker,Sports & Fitness,49.99,2,25.00
+2023-04-03,Laptop Bag,Accessories,39.99,1,39.99
+2023-04-04,Smart Bulb,Home & Kitchen,24.99,4,6.25
+2023-04-05,Power Bank,Electronics,45.99,2,23.00
+2023-05-01,Wireless Earbuds,Electronics,129.99,3,129.99
+2023-05-02,Desk Organizer,Office Products,19.99,4,5.00
+2023-05-03,Bluetooth Speaker,Electronics,79.99,1,79.99
+2023-05-04,Yoga Block,Sports & Fitness,14.99,3,5.00
+2023-05-05,Monitor Stand,Office Products,49.99,2,25.00
+2023-06-01,Smart Watch,Electronics,199.99,2,199.99
+2023-06-02,Water Bottle,Sports & Fitness,19.99,5,4.00
+2023-06-03,Phone Stand,Accessories,12.99,4,3.25
+2023-06-04,Air Purifier,Home & Kitchen,149.99,1,149.99
+2023-06-05,Gaming Mouse,Electronics,49.99,2,25.00 
