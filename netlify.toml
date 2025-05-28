@@ -1,20 +1,15 @@
 [build]
-  command = "npm install && pip install -r requirements.txt"
-  functions = "netlify/functions"
+  command = "pip install -r requirements.txt"
   publish = "."
 
-[[plugins]]
-package = "@netlify/plugin-python"
-
 [functions]
-  directory = "netlify/functions"
+  directory = "api"
   node_bundler = "esbuild"
 
 [build.environment]
   PYTHON_VERSION = "3.9"
-  NODE_VERSION = "18"
 
 [[redirects]]
   from = "/*"
-  to = "/.netlify/functions/app"
+  to = "/.netlify/functions/main"
   status = 200 
