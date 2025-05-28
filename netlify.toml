@@ -1,6 +1,16 @@
 [build]
-  command = "pip install -r requirements.txt"
+  command = """
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  """
   publish = "."
 
 [build.environment]
-  PYTHON_VERSION = "3.9" 
+  PYTHON_VERSION = "3.9"
+  NETLIFY_USE_YARN = "false"
+  NODE_VERSION = "18"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/app"
+  status = 200 
