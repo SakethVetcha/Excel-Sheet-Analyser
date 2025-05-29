@@ -79,22 +79,24 @@ class FlexibleDataAnalysis:
                 'Item': 'count'
             }).reset_index()
             
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            fig, ax = plt.subplots(figsize=(10, 6))
             
             # Revenue trend
-            ax1.plot(time_data['Date'], time_data['Price'], marker='o', linewidth=2, color='#1f77b4')
-            ax1.set_title('Monthly Revenue Trends', pad=20)
-            ax1.set_xlabel('Month')
-            ax1.set_ylabel('Total Revenue ($)')
-            ax1.grid(True, linestyle='--', alpha=0.7)
-            ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+            ax.plot(time_data['Date'], time_data['Price'], marker='o', linewidth=2, color='#1f77b4')
+            ax.set_title('Monthly Revenue Trends', pad=20)
+            ax.set_xlabel('Month')
+            ax.set_ylabel('Total Revenue ($)')
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
             
-            # Transaction count trend
-            ax2.plot(time_data['Date'], time_data['Item'], marker='s', linewidth=2, color='#ff7f0e')
-            ax2.set_title('Monthly Transaction Count', pad=20)
-            ax2.set_xlabel('Month')
-            ax2.set_ylabel('Number of Transactions')
-            ax2.grid(True, linestyle='--', alpha=0.7)
+            # Add number of transactions as text annotations
+            for i, (date, revenue, count) in enumerate(zip(time_data['Date'], time_data['Price'], time_data['Item'])):
+                ax.annotate(f'{count} sales', 
+                          (date, revenue),
+                          textcoords="offset points",
+                          xytext=(0,10),
+                          ha='center',
+                          fontsize=8)
             
             plt.tight_layout()
             return fig
