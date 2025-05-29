@@ -10,6 +10,8 @@ class FlexibleDataAnalysis:
     def __init__(self, df):
         self.df = df
         self.has_date = 'Date' in df.columns
+        if self.has_date:
+            st.write("Debug: Date column found")
         self.has_type = 'Type' in df.columns
         # Convert Price column to numeric, replacing any errors with NaN
         if 'Price' in self.df.columns:
@@ -66,18 +68,28 @@ class FlexibleDataAnalysis:
             return None
     
     def time_trends(self):
-        if self.df is None or not self.has_date:
+        if self.df is None:
+            st.warning("No data available for time trends")
+            return None
+            
+        if not self.has_date:
+            st.warning("No Date column available for time trends")
             return None
             
         try:
+            st.write("Debug: Processing date column...")
             # Convert to datetime if not already
             if not pd.api.types.is_datetime64_any_dtype(self.df['Date']):
+                st.write("Debug: Converting date column to datetime")
                 self.df['Date'] = pd.to_datetime(self.df['Date'])
+                st.write("Debug: Date conversion successful")
             
+            st.write("Debug: Creating time series data...")
             time_data = self.df.set_index('Date').resample('M').agg({
                 'Price': 'sum',
                 'Item': 'count'
             }).reset_index()
+            st.write("Debug: Time series data created successfully")
             
             fig, ax = plt.subplots(figsize=(10, 6))
             
@@ -175,6 +187,7 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, engine="openpyxl")
         st.write("Preview of uploaded data:")
         st.dataframe(df.head())
+        st.write("Debug: Column names in uploaded file:", df.columns.tolist())
 
         st.info("Map your columns to the required fields:")
         columns = df.columns.tolist()
@@ -183,7 +196,7 @@ if uploaded_file:
         item_col = st.selectbox("Select the Item column (required)", columns, key="item_col")
         price_col = st.selectbox("Select the Price column (required)", columns, key="price_col")
         
-        # Optional columns
+        # Optional columns with better None handling
         date_col = st.selectbox("Select the Date column (optional)", ["None"] + columns, key="date_col")
         type_col = st.selectbox("Select the Type column (optional)", ["None"] + columns, key="type_col")
 
@@ -195,18 +208,23 @@ if uploaded_file:
             }
             
             if date_col != "None":
+                st.write(f"Debug: Date column selected: {date_col}")
                 col_map[date_col] = 'Date'
             if type_col != "None":
                 col_map[type_col] = 'Type'
                 
             df_renamed = df.rename(columns=col_map)
+            st.write("Debug: Columns after renaming:", df_renamed.columns.tolist())
 
             # Try to parse date if present
             if 'Date' in df_renamed.columns:
                 try:
+                    st.write("Debug: Attempting to parse date column")
                     df_renamed['Date'] = pd.to_datetime(df_renamed['Date'])
+                    st.write("Debug: Date parsing successful")
                 except Exception as e:
-                    st.warning(f"Could not parse Date column: {e}")
+                    st.warning(f"Could not parse Date column: {str(e)}")
+                    st.write("Debug: Date column content sample:", df_renamed['Date'].head())
 
             analyzer = FlexibleDataAnalysis(df_renamed)
             st.success("Data loaded successfully!")
