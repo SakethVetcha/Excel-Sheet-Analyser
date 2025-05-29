@@ -138,28 +138,136 @@ class FlexibleDataAnalysis:
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 # Basic Statistics
                 pd.DataFrame(self.basic_statistics()).to_excel(writer, sheet_name='Basic Statistics')
+                ws = writer.sheets['Basic Statistics']
+                ws.column_dimensions['A'].width = 25
+                ws.column_dimensions['B'].width = 15
                 
                 # Type Analysis if available
                 if self.has_type:
                     type_analysis = self.type_analysis()
                     if type_analysis is not None:
                         type_analysis.to_excel(writer, sheet_name='Type Analysis')
+                        ws = writer.sheets['Type Analysis']
+                        ws.column_dimensions['A'].width = 30
+                        for col in ws.columns:
+                            if col[0].column_letter != 'A':
+                                ws.column_dimensions[col[0].column_letter].width = 15
                 
                 # Top Items
                 top = self.top_items(n=10)
                 if top is not None:
                     top.to_excel(writer, sheet_name='Top Items')
-                
-                # Time Analysis if date is available
+                    ws = writer.sheets['Top Items']
+                    ws.column_dimensions['A'].width = 35
+                    for col in ws.columns:
+                        if col[0].column_letter != 'A':
+                            ws.column_dimensions[col[0].column_letter].width = 15
+
+                # Monthly Analysis
                 if self.has_date:
                     try:
-                        time_data = self.df.set_index('Date').resample('M').agg({
+                        # Convert to datetime if not already
+                        if not pd.api.types.is_datetime64_any_dtype(self.df['Date']):
+                            self.df['Date'] = pd.to_datetime(self.df['Date'])
+                        
+                        # Create monthly summary
+                        monthly_data = self.df.set_index('Date').resample('M').agg({
                             'Price': 'sum',
                             'Item': 'count'
                         }).reset_index()
-                        time_data.to_excel(writer, sheet_name='Time Trends', index=False)
-                    except:
-                        pass
+                        
+                        # Create Monthly Trends sheet with chart
+                        monthly_data.to_excel(writer, sheet_name='Monthly Trends', index=False)
+                        ws = writer.sheets['Monthly Trends']
+                        ws.column_dimensions['A'].width = 20
+                        ws.column_dimensions['B'].width = 15
+                        ws.column_dimensions['C'].width = 15
+                        
+                        # Create chart
+                        from openpyxl.chart import LineChart, Reference
+                        chart = LineChart()
+                        chart.title = "Monthly Revenue Trends"
+                        chart.y_axis.title = "Revenue ($)"
+                        chart.x_axis.title = "Month"
+                        
+                        data = Reference(ws, min_col=2, min_row=1, max_row=len(monthly_data)+1, max_col=2)
+                        cats = Reference(ws, min_col=1, min_row=2, max_row=len(monthly_data)+1)
+                        
+                        chart.add_data(data, titles_from_data=True)
+                        chart.set_categories(cats)
+                        ws.add_chart(chart, "E2")
+                        
+                        # Create detailed monthly sheets
+                        from openpyxl.chart import LineChart, Reference
+                        
+                        for name, group in self.df.groupby(self.df['Date'].dt.strftime('%Y-%m')):
+                            sheet_name = f"Month_{name}"
+                            # Group by item and calculate stats
+                            monthly_items = group.groupby('Item').agg({
+                                'Price': ['sum', 'mean', 'count']
+                            }).round(2)
+                            monthly_items.columns = ['Total Revenue', 'Average Price', 'Number of Sales']
+                            monthly_items = monthly_items.sort_values('Total Revenue', ascending=False)
+                            
+                            monthly_items.to_excel(writer, sheet_name=sheet_name)
+                            ws = writer.sheets[sheet_name]
+                            ws.column_dimensions['A'].width = 35
+                            for col in ws.columns:
+                                if col[0].column_letter != 'A':
+                                    ws.column_dimensions[col[0].column_letter].width = 15
+                            
+                            # Add conditional formatting to highlight top performers
+                            from openpyxl.styles import PatternFill
+                            green_fill = PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
+                            yellow_fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
+                            
+                            # Highlight top 3 revenue items
+                            for i in range(2, min(5, len(monthly_items) + 2)):
+                                for j in range(1, 5):
+                                    cell = ws.cell(row=i, column=j)
+                                    if i == 2:
+                                        cell.fill = green_fill
+                                    elif i == 3 or i == 4:
+                                        cell.fill = yellow_fill
+                            
+                            # Create comparison line chart for each month
+                            chart = LineChart()
+                            chart.title = f"Revenue vs Quantity - {name}"
+                            chart.style = 10
+                            chart.y_axis.title = "Revenue ($) / Quantity"
+                            chart.x_axis.title = "Items"
+                            
+                            # Get top 10 items by revenue for the chart
+                            top_10_items = monthly_items.head(10)
+                            
+                            # Add revenue data
+                            revenue_data = Reference(ws, min_col=2, min_row=1, max_row=len(top_10_items)+1, max_col=2)
+                            cats = Reference(ws, min_col=1, min_row=2, max_row=len(top_10_items)+1)
+                            chart.add_data(revenue_data, titles_from_data=True)
+                            
+                            # Add quantity data
+                            quantity_data = Reference(ws, min_col=4, min_row=1, max_row=len(top_10_items)+1, max_col=4)
+                            chart.add_data(quantity_data, titles_from_data=True)
+                            
+                            # Customize line chart
+                            chart.set_categories(cats)
+                            chart.height = 15  # Height in cm
+                            chart.width = 25   # Width in cm
+                            
+                            # Configure legend position
+                            chart.legend.position = 'r'
+                            
+                            # Make lines more visible
+                            for series in chart.series:
+                                series.smooth = True  # Make lines smooth
+                                series.marker.symbol = "circle"  # Add markers
+                                series.marker.size = 8  # Make markers visible
+                            
+                            # Position the chart below the data
+                            ws.add_chart(chart, f"A{len(monthly_items) + 5}")
+                                        
+                    except Exception as e:
+                        st.warning(f"Could not create monthly analysis: {str(e)}")
                         
             output.seek(0)
             return output
@@ -179,16 +287,23 @@ if uploaded_file:
         st.write("Preview of uploaded data:")
         st.dataframe(df.head())
 
+        # Filter out index-like columns
+        valid_columns = [col for col in df.columns if not (
+            col == "Unnamed: 0" or 
+            col == "index" or 
+            str(col).isdigit() or 
+            str(col).startswith('Unnamed:')
+        )]
+
         st.info("Map your columns to the required fields:")
-        columns = df.columns.tolist()
         
         # Required columns
-        item_col = st.selectbox("Select the Item column (required)", columns, key="item_col")
-        price_col = st.selectbox("Select the Price column (required)", columns, key="price_col")
+        item_col = st.selectbox("Select the Item column (required)", valid_columns, key="item_col")
+        price_col = st.selectbox("Select the Price column (required)", valid_columns, key="price_col")
         
         # Optional columns
-        date_col = st.selectbox("Select the Date column (optional)", ["None"] + columns, key="date_col")
-        type_col = st.selectbox("Select the Type column (optional)", ["None"] + columns, key="type_col")
+        date_col = st.selectbox("Select the Date column (optional)", ["None"] + valid_columns, key="date_col")
+        type_col = st.selectbox("Select the Type column (optional)", ["None"] + valid_columns, key="type_col")
 
         if item_col and price_col:  # Required columns are selected
             # Rename columns for internal use
