@@ -6,178 +6,215 @@ import seaborn as sns
 from io import BytesIO
 from datetime import datetime
 
-# Updated analysis class: robust to missing, extra, or differently named columns
-class AmazonSalesAnalysis:
+class FlexibleDataAnalysis:
     def __init__(self, df):
         self.df = df
+        self.has_date = 'Date' in df.columns
+        self.has_type = 'Type' in df.columns
 
     def basic_statistics(self):
         if self.df is None:
             return None
         stats = {}
-        if 'Sales' in self.df.columns:
-            stats["Total Sales Revenue"] = f"${self.df['Sales'].sum():,.2f}"
-            stats["Average Sales Amount"] = f"${self.df['Sales'].mean():,.2f}"
-            stats["Highest Single Sale"] = f"${self.df['Sales'].max():,.2f}"
-            stats["Lowest Single Sale"] = f"${self.df['Sales'].min():,.2f}"
-        else:
-            stats["Sales columns missing"] = "N/A"
-        if 'Quantity' in self.df.columns:
-            stats["Total Products Sold"] = f"{self.df['Quantity'].sum():,}"
-            stats["Average Items Per Sale"] = f"{self.df['Quantity'].mean():.1f}"
-        else:
-            stats["Quantity columns missing"] = "N/A"
-        if 'Product' in self.df.columns:
-            stats["Total Unique Products"] = f"{len(self.df['Product'].unique()):,}"
-        else:
-            stats["Product column missing"] = "N/A"
+        
+        # Price statistics (always available)
+        stats["Total Revenue"] = f"${self.df['Price'].sum():,.2f}"
+        stats["Average Price"] = f"${self.df['Price'].mean():,.2f}"
+        stats["Highest Price"] = f"${self.df['Price'].max():,.2f}"
+        stats["Lowest Price"] = f"${self.df['Price'].min():,.2f}"
+        
+        # Item statistics
+        stats["Total Unique Items"] = f"{len(self.df['Item'].unique()):,}"
+        stats["Total Transactions"] = f"{len(self.df):,}"
+        
+        # Type statistics if available
+        if self.has_type:
+            stats["Number of Categories"] = f"{len(self.df['Type'].unique()):,}"
+        
         return pd.Series(stats)
     
-    def sales_by_category(self):
-        if self.df is None:
+    def type_analysis(self):
+        if self.df is None or not self.has_type:
             return None
-        required = {'Category', 'Sales', 'Quantity'}
-        if not required.issubset(self.df.columns):
-            st.info("Category, Sales, or Quantity column missing. Skipping category analysis.")
-            return None
-        category_sales = self.df.groupby('Category').agg({
-            'Sales': ['sum', 'mean', 'count'],
-            'Quantity': 'sum'
+            
+        type_analysis = self.df.groupby('Type').agg({
+            'Price': ['sum', 'mean', 'count'],
+            'Item': 'nunique'
         }).round(2)
-        category_sales.columns = ['Total Sales', 'Average Sales', 'Number of Orders', 'Units Sold']
-        category_sales = category_sales.sort_values('Total Sales', ascending=False)
-        category_sales['Sales(%)'] = (category_sales['Total Sales'] / category_sales['Total Sales'].sum() * 100).round(2)
-        category_sales['Orders(%)'] = (category_sales['Number of Orders'] / category_sales['Number of Orders'].sum() * 100).round(2)
-        return category_sales
+        
+        type_analysis.columns = ['Total Revenue', 'Average Price', 'Number of Sales', 'Unique Items']
+        type_analysis = type_analysis.sort_values('Total Revenue', ascending=False)
+        type_analysis['Revenue(%)'] = (type_analysis['Total Revenue'] / type_analysis['Total Revenue'].sum() * 100).round(2)
+        
+        return type_analysis
     
-    def monthly_trends(self):
-        if self.df is None:
+    def time_trends(self):
+        if self.df is None or not self.has_date:
             return None
-        required = {'Date', 'Sales', 'Quantity'}
-        if not required.issubset(self.df.columns):
-            st.info("Date, Sales, or Quantity column missing. Skipping monthly trends.")
-            return None
-        monthly_data = self.df.set_index('Date').resample('M').agg({
-            'Sales': 'sum',
-            'Quantity': 'sum'
+            
+        # Convert to datetime if not already
+        if not pd.api.types.is_datetime64_any_dtype(self.df['Date']):
+            try:
+                self.df['Date'] = pd.to_datetime(self.df['Date'])
+            except:
+                return None
+        
+        time_data = self.df.set_index('Date').resample('M').agg({
+            'Price': 'sum',
+            'Item': 'count'
         }).reset_index()
+        
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-        ax1.plot(monthly_data['Date'], monthly_data['Sales'], marker='o', linewidth=2, color='#1f77b4')
-        ax1.set_title('Monthly Sales Trends', pad=20)
+        
+        # Revenue trend
+        ax1.plot(time_data['Date'], time_data['Price'], marker='o', linewidth=2, color='#1f77b4')
+        ax1.set_title('Monthly Revenue Trends', pad=20)
         ax1.set_xlabel('Month')
-        ax1.set_ylabel('Total Sales ($)')
+        ax1.set_ylabel('Total Revenue ($)')
         ax1.grid(True, linestyle='--', alpha=0.7)
         ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
-        ax2.plot(monthly_data['Date'], monthly_data['Quantity'], marker='s', linewidth=2, color='#ff7f0e')
-        ax2.set_title('Monthly Units Sold Trend', pad=20)
+        
+        # Transaction count trend
+        ax2.plot(time_data['Date'], time_data['Item'], marker='s', linewidth=2, color='#ff7f0e')
+        ax2.set_title('Monthly Transaction Count', pad=20)
         ax2.set_xlabel('Month')
-        ax2.set_ylabel('Units Sold')
+        ax2.set_ylabel('Number of Transactions')
         ax2.grid(True, linestyle='--', alpha=0.7)
+        
         plt.tight_layout()
         return fig
 
-    def top_products(self, n=10):
+    def top_items(self, n=10):
         if self.df is None:
             return None
-        required = {'Product', 'Sales', 'Quantity'}
-        if not required.issubset(self.df.columns):
-            st.info("Product, Sales, or Quantity column missing. Skipping top products.")
-            return None
-        top_products = self.df.groupby('Product').agg({
-            'Sales': 'sum',
-            'Quantity': 'sum'
+            
+        top_items = self.df.groupby('Item').agg({
+            'Price': ['sum', 'mean', 'count']
         }).round(2)
-        top_products['Average Price'] = (top_products['Sales'] / top_products['Quantity']).round(2)
-        top_products = top_products.sort_values('Sales', ascending=False)
-        return top_products.head(n)
+        
+        top_items.columns = ['Total Revenue', 'Average Price', 'Times Sold']
+        top_items = top_items.sort_values('Total Revenue', ascending=False)
+        
+        if self.has_type:
+            # Add most common type for each item
+            item_types = self.df.groupby('Item')['Type'].agg(lambda x: x.mode()[0])
+            top_items['Primary Type'] = item_types
+            
+        return top_items.head(n)
     
     def generate_excel_report(self):
         if self.df is None:
             return None
+            
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Basic Statistics
             pd.DataFrame(self.basic_statistics()).to_excel(writer, sheet_name='Basic Statistics')
-            cat = self.sales_by_category()
-            if cat is not None:
-                cat.to_excel(writer, sheet_name='Category Analysis')
-            top = self.top_products(n=10)
+            
+            # Type Analysis if available
+            if self.has_type:
+                type_analysis = self.type_analysis()
+                if type_analysis is not None:
+                    type_analysis.to_excel(writer, sheet_name='Type Analysis')
+            
+            # Top Items
+            top = self.top_items(n=10)
             if top is not None:
-                top.to_excel(writer, sheet_name='Top Products')
-            if {'Date', 'Sales', 'Quantity'}.issubset(self.df.columns):
-                monthly_data = self.df.set_index('Date').resample('M').agg({
-                    'Sales': 'sum',
-                    'Quantity': 'sum'
-                }).reset_index()
-                monthly_data.to_excel(writer, sheet_name='Monthly Trends', index=False)
+                top.to_excel(writer, sheet_name='Top Items')
+            
+            # Time Analysis if date is available
+            if self.has_date:
+                try:
+                    time_data = self.df.set_index('Date').resample('M').agg({
+                        'Price': 'sum',
+                        'Item': 'count'
+                    }).reset_index()
+                    time_data.to_excel(writer, sheet_name='Time Trends', index=False)
+                except:
+                    pass
+                    
         output.seek(0)
         return output
 
 # Streamlit UI
-st.set_page_config(page_title="Amazon Sales Excel Analyzer", layout="wide")
-st.title("📊 Amazon Sales Excel Sheet Analyzer")
+st.set_page_config(page_title="Flexible Data Analyzer", layout="wide")
+st.title("📊 Data Analysis Dashboard")
 
-uploaded_file = st.file_uploader("Upload your Amazon sales Excel file", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file, engine="openpyxl")
     st.write("Preview of uploaded data:")
     st.dataframe(df.head())
 
-    st.info("Map your columns to the expected fields below (required fields are marked):")
+    st.info("Map your columns to the required fields:")
     columns = df.columns.tolist()
-    date_col = st.selectbox("Select the Date column*", columns, key="date_col")
-    sales_col = st.selectbox("Select the Sales column*", columns, key="sales_col")
-    qty_col = st.selectbox("Select the Quantity column*", columns, key="qty_col")
-    prod_col = st.selectbox("Select the Product column*", columns, key="prod_col")
-    cat_col = st.selectbox("Select the Category column*", columns, key="cat_col")
+    
+    # Required columns
+    item_col = st.selectbox("Select the Item column (required)", columns, key="item_col")
+    price_col = st.selectbox("Select the Price column (required)", columns, key="price_col")
+    
+    # Optional columns
+    date_col = st.selectbox("Select the Date column (optional)", ["None"] + columns, key="date_col")
+    type_col = st.selectbox("Select the Type column (optional)", ["None"] + columns, key="type_col")
 
-    # Rename columns for internal use, but only if the user mapped them
-    col_map = {}
-    if date_col: col_map[date_col] = 'Date'
-    if sales_col: col_map[sales_col] = 'Sales'
-    if qty_col: col_map[qty_col] = 'Quantity'
-    if prod_col: col_map[prod_col] = 'Product'
-    if cat_col: col_map[cat_col] = 'Category'
-    df_renamed = df.rename(columns=col_map)
+    if item_col and price_col:  # Required columns are selected
+        # Rename columns for internal use
+        col_map = {
+            item_col: 'Item',
+            price_col: 'Price'
+        }
+        
+        if date_col != "None":
+            col_map[date_col] = 'Date'
+        if type_col != "None":
+            col_map[type_col] = 'Type'
+            
+        df_renamed = df.rename(columns=col_map)
 
-    # Try to parse date if present
-    if 'Date' in df_renamed.columns:
-        try:
-            df_renamed['Date'] = pd.to_datetime(df_renamed['Date'])
-        except Exception as e:
-            st.warning(f"Could not parse Date column: {e}")
+        # Try to parse date if present
+        if 'Date' in df_renamed.columns:
+            try:
+                df_renamed['Date'] = pd.to_datetime(df_renamed['Date'])
+            except Exception as e:
+                st.warning(f"Could not parse Date column: {e}")
 
-    analyzer = AmazonSalesAnalysis(df_renamed)
-    st.success("Data loaded successfully!")
-    st.subheader("Basic Statistics")
-    stats = analyzer.basic_statistics()
-    if stats is not None:
-        st.table(stats)
-    
-    st.subheader("Sales by Category")
-    cat_sales = analyzer.sales_by_category()
-    if cat_sales is not None:
-        st.dataframe(cat_sales)
-    
-    st.subheader("Monthly Trends")
-    fig = analyzer.monthly_trends()
-    if fig is not None:
-        st.pyplot(fig)
-    
-    st.subheader("Top 10 Products by Sales")
-    top_prods = analyzer.top_products()
-    if top_prods is not None:
-        st.dataframe(top_prods)
-    
-    st.subheader("Download Excel Report")
-    excel_report = analyzer.generate_excel_report()
-    if excel_report is not None:
-        st.download_button(
-            label="Download Analysis Excel Report",
-            data=excel_report,
-            file_name="sales_analysis_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        analyzer = FlexibleDataAnalysis(df_renamed)
+        st.success("Data loaded successfully!")
+        
+        st.subheader("Basic Statistics")
+        stats = analyzer.basic_statistics()
+        if stats is not None:
+            st.table(stats)
+        
+        if analyzer.has_type:
+            st.subheader("Analysis by Type")
+            type_analysis = analyzer.type_analysis()
+            if type_analysis is not None:
+                st.dataframe(type_analysis)
+        
+        if analyzer.has_date:
+            st.subheader("Time Trends")
+            fig = analyzer.time_trends()
+            if fig is not None:
+                st.pyplot(fig)
+        
+        st.subheader("Top 10 Items by Revenue")
+        top_items = analyzer.top_items()
+        if top_items is not None:
+            st.dataframe(top_items)
+        
+        st.subheader("Download Excel Report")
+        excel_report = analyzer.generate_excel_report()
+        if excel_report is not None:
+            st.download_button(
+                label="Download Analysis Excel Report",
+                data=excel_report,
+                file_name="analysis_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        st.warning("Please select the required Item and Price columns to begin analysis.")
 else:
     st.info("Please upload an Excel file to begin analysis.")
 
