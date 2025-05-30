@@ -30,6 +30,7 @@ The tool will generate:
    - Category Analysis
    - Top Products
    - Monthly Trends
+   - Analysis of every month along with line graph(Revenue and Quantity)
 2. A visualization of monthly sales trends ('monthly_sales_trend.png')
 
 ## Features
