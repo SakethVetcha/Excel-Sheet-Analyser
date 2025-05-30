@@ -94,12 +94,7 @@ class FlexibleDataAnalysis:
             
             # Add number of transactions as text annotations
             for i, (date, revenue, count) in enumerate(zip(time_data['Date'], time_data['Price'], time_data['Item'])):
-                ax.annotate(f'{count} sales', 
-                          (date, revenue),
-                          textcoords="offset points",
-                          xytext=(0,10),
-                          ha='center',
-                          fontsize=8)
+                ax.annotate(f'{count} sales', (date, revenue),textcoords="offset points",xytext=(0,10),ha='center',fontsize=8)
             
             plt.tight_layout()
             return fig
