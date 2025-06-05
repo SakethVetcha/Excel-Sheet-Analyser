@@ -1,19 +1,210 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+import gc
 from io import BytesIO
 from datetime import datetime
+from pptx import Presentation
+from pptx.util import Inches
+import numpy as np
+
+@st.cache_data
+def load_excel_sheet(_file, sheet_name):
+    """Cache the loading of individual sheets to prevent reloading"""
+    try:
+        # Determine the engine based on the file object's name if available, otherwise use openpyxl
+        if hasattr(_file, 'name'):
+            engine = 'openpyxl' if _file.name.endswith('.xlsx') else 'pyxlsb'
+        else:
+            # Default to openpyxl if we can't determine the file type
+            engine = 'openpyxl'
+            
+        # Read Excel file with optimized memory usage
+        df = pd.read_excel(
+            _file, 
+            sheet_name=sheet_name,
+            engine=engine
+        )
+        
+        # Optimize memory usage
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                # Convert object types to categories if they have few unique values
+                if df[col].nunique() / len(df) < 0.5:  # If less than 50% unique values
+                    df[col] = df[col].astype('category')
+            elif df[col].dtype == 'float64':
+                # Downcast float64 to float32 if possible
+                df[col] = pd.to_numeric(df[col], downcast='float')
+            elif df[col].dtype == 'int64':
+                # Downcast int64 to smallest integer type possible
+                df[col] = pd.to_numeric(df[col], downcast='integer')
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading sheet {sheet_name}: {str(e)}")
+        return None
 
 class FlexibleDataAnalysis:
     def __init__(self, df):
         self.df = df
-        self.has_date = 'Date' in df.columns
+        
         self.has_type = 'Type' in df.columns
-        # Convert Price column to numeric, replacing any errors with NaN
-        if 'Price' in self.df.columns:
-            self.df['Price'] = pd.to_numeric(self.df['Price'], errors='coerce')
+        self.has_price = 'Price' in df.columns
+        self.has_quantity = 'Quantity' in df.columns
+        
+        if not self.has_price:
+            st.error("Error: 'Price' column is missing in the data. Please ensure you've selected the correct Price column.")
+            return
+            
+        # Convert Price and Quantity columns with memory optimization
+        if self.has_price:
+            self.df['Price'] = pd.to_numeric(self.df['Price'], errors='coerce', downcast='float')
+        
+        if self.has_quantity:
+            self.df['Quantity'] = pd.to_numeric(self.df['Quantity'], errors='coerce', downcast='integer')
+        else:
+            # If no Quantity column, default to 1
+            self.df['Quantity'] = 1
+            self.has_quantity = True
+        
+        # Calculate total price with optimized types
+        try:
+            self.df['Total_Price'] = self.df['Price'] * self.df['Quantity']
+            self.df['Total_Price'] = pd.to_numeric(self.df['Total_Price'], downcast='float')
+        except Exception as e:
+            st.error(f"Error calculating Total Price: {str(e)}")
+            self.df['Total_Price'] = 0
+
+    def create_pie_chart(self, column, title):
+        if column not in self.df.columns:
+            return None
+        
+        plt.figure(figsize=(15, 10))  # Increased figure size
+        data = self.df[column].value_counts()
+        
+        # If too many categories, group small ones into "Others"
+        if len(data) > 15:
+            threshold = data.sum() * 0.01  # 1% threshold
+            other_mask = data < threshold
+            if other_mask.any():
+                other_sum = data[other_mask].sum()
+                data = data[~other_mask]
+                data['Others'] = other_sum
+        
+        # Sort values in descending order for better label placement
+        data = data.sort_values(ascending=False)
+        
+        # Calculate percentages
+        total = data.sum()
+        percentages = [(val/total)*100 for val in data.values]
+        
+        # Create pie chart without labels first
+        explode = [0.05] * len(data)  # Slight explosion for all segments
+        wedges, _ = plt.pie(
+            data.values,
+            explode=explode,
+            labels=None,  # No direct labels
+            autopct=None,  # No direct percentage labels
+            startangle=90,
+            radius=1.5,
+            counterclock=False,
+            wedgeprops={'linewidth': 2, 'edgecolor': 'white'}
+        )
+        
+        # Create legend-style labels with arrows
+        bbox_props = dict(boxstyle="round,pad=0.5", fc="w", ec="gray", alpha=0.9)
+        # Get angles for each wedge
+        angles = []
+        for i, wedge in enumerate(wedges):
+            theta1, theta2 = wedge.theta1, wedge.theta2
+            # Get the middle angle in radians for the wedge
+            angle = np.deg2rad((theta1 + theta2)/2)
+            angles.append(angle)
+        
+        # Organize labels in left and right columns
+        left_labels = []
+        right_labels = []
+        
+        for i, (wedge, pct, angle) in enumerate(zip(wedges, percentages, angles)):
+            # Determine which side to place the label
+            if -np.pi/2 <= angle <= np.pi/2:
+                right_labels.append((i, wedge, pct, angle))
+            else:
+                left_labels.append((i, wedge, pct, angle))
+        
+        # Sort labels by y-coordinate
+        left_labels.sort(key=lambda x: np.sin(x[3]), reverse=True)
+        right_labels.sort(key=lambda x: np.sin(x[3]), reverse=True)
+        
+        # Place labels with appropriate spacing
+        def place_labels(labels, side='left'):
+            spacing = 2.0 / (len(labels) + 1) if labels else 1  # Dynamic spacing
+            for idx, (i, wedge, pct, angle) in enumerate(labels):
+                # Calculate label position
+                if side == 'left':
+                    x = -2.5  # Fixed x for left side
+                    y = 1.0 - (idx + 1) * spacing  # Evenly spaced y coordinates
+                else:
+                    x = 2.5  # Fixed x for right side
+                    y = 1.0 - (idx + 1) * spacing
+                
+                # Calculate the arrow start position using radius and explode
+                radius = 1.5
+                explode_val = explode[i] if 'explode' in locals() else 0
+                start_x = np.cos(angle) * (radius + explode_val)
+                start_y = np.sin(angle) * (radius + explode_val)
+                
+                # Create the label text
+                label = f"{data.index[i]}\n{pct:.1f}%"
+                
+                # Add arrow and label
+                plt.annotate(
+                    label,
+                    xy=(start_x, start_y),  # Arrow start (wedge)
+                    xytext=(x, y),  # Label position
+                    size=14,
+                    ha='right' if side == 'left' else 'left',
+                    va='center',
+                    bbox=bbox_props,
+                    arrowprops=dict(
+                        arrowstyle="->",
+                        connectionstyle="arc3,rad=0.2",
+                        color='gray',
+                        lw=2
+                    )
+                )
+        
+        # Place labels on both sides
+        place_labels(left_labels, 'left')
+        place_labels(right_labels, 'right')
+        
+        # Add title with padding
+        plt.title(title, pad=20, size=18, weight='bold')
+        
+        # Equal aspect ratio ensures circular pie
+        plt.axis('equal')
+        
+        # Add more padding around the entire figure
+        plt.tight_layout(pad=3.0)
+        
+        return plt.gcf()
+
+    def create_all_pie_charts(self):
+        charts = {}
+        
+        with st.spinner('Creating pie charts...'):
+            if 'Source' in self.df.columns:
+                charts['Source of Scan'] = self.create_pie_chart('Source', 'Distribution by Source of Scan')
+            if 'Status' in self.df.columns:
+                charts['Old/New'] = self.create_pie_chart('Status', 'Distribution by Old/New Status')
+            if 'Transaction_Status' in self.df.columns:
+                charts['Transaction Status'] = self.create_pie_chart('Transaction_Status', 'Distribution by Transaction Status')
+            if 'Payment_Mode' in self.df.columns:
+                charts['Payment Mode'] = self.create_pie_chart('Payment_Mode', 'Distribution by Payment Mode')
+            if 'Product_Name' in self.df.columns:
+                charts['Product Name'] = self.create_pie_chart('Product_Name', 'Distribution by Product Name')
+        
+        return charts
 
     def basic_statistics(self):
         if self.df is None:
@@ -21,23 +212,22 @@ class FlexibleDataAnalysis:
         stats = {}
         
         try:
-            # Price statistics (always available)
-            total_revenue = self.df['Price'].sum()
-            avg_price = self.df['Price'].mean()
-            max_price = self.df['Price'].max()
-            min_price = self.df['Price'].min()
+            total_revenue = self.df['Total_Price'].sum()
+            avg_unit_price = self.df['Price'].mean()
+            max_unit_price = self.df['Price'].max()
+            min_unit_price = self.df['Price'].min()
+            total_quantity = self.df['Quantity'].sum()
+            avg_transaction_value = total_revenue / len(self.df)
             
-            # Format statistics with error handling
             stats["Total Revenue"] = f"${total_revenue:,.2f}" if pd.notnull(total_revenue) else "N/A"
-            stats["Average Price"] = f"${avg_price:,.2f}" if pd.notnull(avg_price) else "N/A"
-            stats["Highest Price"] = f"${max_price:,.2f}" if pd.notnull(max_price) else "N/A"
-            stats["Lowest Price"] = f"${min_price:,.2f}" if pd.notnull(min_price) else "N/A"
-            
-            # Item statistics
+            stats["Average Unit Price"] = f"${avg_unit_price:,.2f}" if pd.notnull(avg_unit_price) else "N/A"
+            stats["Highest Unit Price"] = f"${max_unit_price:,.2f}" if pd.notnull(max_unit_price) else "N/A"
+            stats["Lowest Unit Price"] = f"${min_unit_price:,.2f}" if pd.notnull(min_unit_price) else "N/A"
+            stats["Total Quantity Sold"] = f"{total_quantity:,.0f}" if pd.notnull(total_quantity) else "N/A"
+            stats["Average Transaction Value"] = f"${avg_transaction_value:,.2f}" if pd.notnull(avg_transaction_value) else "N/A"
             stats["Total Unique Items"] = str(len(self.df['Item'].unique()))
             stats["Total Transactions"] = str(len(self.df))
             
-            # Type statistics if available
             if self.has_type:
                 stats["Number of Categories"] = str(len(self.df['Type'].unique()))
         except Exception as e:
@@ -45,320 +235,328 @@ class FlexibleDataAnalysis:
             return pd.Series({"Error": "Could not calculate statistics"})
         
         return pd.Series(stats)
-    
-    def type_analysis(self):
-        if self.df is None or not self.has_type:
-            return None
-            
-        try:
-            type_analysis = self.df.groupby('Type').agg({
-                'Price': ['sum', 'mean', 'count'],
-                'Item': 'nunique'
-            }).round(2)
-            
-            type_analysis.columns = ['Total Revenue', 'Average Price', 'Number of Sales', 'Unique Items']
-            type_analysis = type_analysis.sort_values('Total Revenue', ascending=False)
-            type_analysis['Revenue(%)'] = (type_analysis['Total Revenue'] / type_analysis['Total Revenue'].sum() * 100).round(2)
-            
-            return type_analysis
-        except Exception as e:
-            st.error(f"Error in type analysis: {str(e)}")
-            return None
-    
-    def time_trends(self):
-        if self.df is None:
-            return None
-            
-        if not self.has_date:
-            return None
-            
-        try:
-            # Convert to datetime if not already
-            if not pd.api.types.is_datetime64_any_dtype(self.df['Date']):
-                self.df['Date'] = pd.to_datetime(self.df['Date'])
-            
-            time_data = self.df.set_index('Date').resample('M').agg({
-                'Price': 'sum',
-                'Item': 'count'
-            }).reset_index()
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            # Revenue trend
-            ax.plot(time_data['Date'], time_data['Price'], marker='o', linewidth=2, color='#1f77b4')
-            ax.set_title('Monthly Revenue Trends', pad=20)
-            ax.set_xlabel('Month')
-            ax.set_ylabel('Total Revenue ($)')
-            ax.grid(True, linestyle='--', alpha=0.7)
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
-            
-            # Add number of transactions as text annotations
-            for i, (date, revenue, count) in enumerate(zip(time_data['Date'], time_data['Price'], time_data['Item'])):
-                ax.annotate(f'{count} sales', (date, revenue),textcoords="offset points",xytext=(0,10),ha='center',fontsize=8)
-            
-            plt.tight_layout()
-            return fig
-        except Exception as e:
-            st.error(f"Error generating time trends: {str(e)}")
-            return None
 
-    def top_items(self, n=10):
+    def generate_presentation(self, title="Data Analysis Report"):
         if self.df is None:
             return None
             
         try:
-            top_items = self.df.groupby('Item').agg({
-                'Price': ['sum', 'mean', 'count']
-            }).round(2)
+            prs = Presentation()
             
-            top_items.columns = ['Total Revenue', 'Average Price', 'Times Sold']
-            top_items = top_items.sort_values('Total Revenue', ascending=False)
+            # Set slide dimensions to 16:9 aspect ratio
+            prs.slide_width = Inches(13.333)
+            prs.slide_height = Inches(7.5)
             
-            if self.has_type:
-                # Add most common type for each item
-                item_types = self.df.groupby('Item')['Type'].agg(lambda x: x.mode()[0] if len(x.mode()) > 0 else 'Unknown')
-                top_items['Primary Type'] = item_types
-                
-            return top_items.head(n)
-        except Exception as e:
-            st.error(f"Error analyzing top items: {str(e)}")
-            return None
-    
-    def generate_excel_report(self):
-        if self.df is None:
-            return None
+            # Title slide
+            title_slide_layout = prs.slide_layouts[0]
+            slide = prs.slides.add_slide(title_slide_layout)
             
-        try:
+            # Add title safely
+            if hasattr(slide.shapes, 'title') and slide.shapes.title:
+                title_shape = slide.shapes.title
+                title_shape.text = title
+            else:
+                left = Inches(1)
+                top = Inches(1)
+                width = Inches(11.333)  # Adjusted for 16:9
+                height = Inches(1.5)
+                txBox = slide.shapes.add_textbox(left, top, width, height)
+                tf = txBox.text_frame
+                tf.text = title
+
+            # Add data and time to the first slide 
+            try:
+                subtitle = slide.placeholders[1]
+                subtitle.text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            except:
+                left = Inches(1)
+                top = Inches(2.5)
+                width = Inches(11.333)  # Adjusted for 16:9
+                height = Inches(1)
+                txBox = slide.shapes.add_textbox(left, top, width, height)
+                tf = txBox.text_frame
+                tf.text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+            # Basic Statistics slide
+            slide = prs.slides.add_slide(prs.slide_layouts[1])
+            
+            if hasattr(slide.shapes, 'title') and slide.shapes.title:
+                title_shape = slide.shapes.title
+                title_shape.text = 'Basic Statistics'
+            else:
+                left = Inches(1)
+                top = Inches(0.5)
+                width = Inches(11.333)  # Adjusted for 16:9
+                height = Inches(1)
+                txBox = slide.shapes.add_textbox(left, top, width, height)
+                tf = txBox.text_frame
+                tf.text = 'Basic Statistics'
+
+            # Add statistics content
+            stats = self.basic_statistics()
+            try:
+                body_shape = slide.placeholders[1]
+                tf = body_shape.text_frame
+            except:
+                left = Inches(1)
+                top = Inches(2)
+                width = Inches(11.333)  # Adjusted for 16:9
+                height = Inches(4)
+                txBox = slide.shapes.add_textbox(left, top, width, height)  
+                tf = txBox.text_frame
+
+            # Create two columns for statistics
+            stats_items = list(stats.items())
+            mid_point = len(stats_items) // 2
+            
+            # Left column
+            left_col = tf.add_paragraph()
+            for stat_name, stat_value in stats_items[:mid_point]:
+                p = tf.add_paragraph()
+                p.text = f"{stat_name}: {stat_value}"
+                p.level = 0
+            
+            # Right column (if needed)
+            if mid_point < len(stats_items):
+                right_col_box = slide.shapes.add_textbox(
+                    left=Inches(7),
+                    top=Inches(2),
+                    width=Inches(5.333),
+                    height=Inches(4)
+                )
+                right_tf = right_col_box.text_frame
+                for stat_name, stat_value in stats_items[mid_point:]:
+                    p = right_tf.add_paragraph()
+                    p.text = f"{stat_name}: {stat_value}"
+
+            # Pie Charts slides
+            charts = self.create_all_pie_charts()
+            if charts:
+                for chart_title, fig in charts.items():
+                    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
+                    
+                    # Add title
+                    left = Inches(1)
+                    top = Inches(0.5)
+                    width = Inches(11.333)  # Adjusted for 16:9
+                    height = Inches(1)
+                    txBox = slide.shapes.add_textbox(left, top, width, height)
+                    tf = txBox.text_frame
+                    tf.text = chart_title
+                    
+                    # Adjust figure size for 16:9 aspect ratio and add padding
+                    plt.figure(figsize=(15, 10))
+                    plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
+                    
+                    # Save the matplotlib figure to a BytesIO object with high quality
+                    img_stream = BytesIO()
+                    fig.savefig(
+                        img_stream, 
+                        format='png', 
+                        bbox_inches='tight', 
+                        dpi=300, 
+                        pad_inches=1.0,  # Increased padding
+                        facecolor='white'
+                    )
+                    img_stream.seek(0)
+                    
+                    # Calculate dimensions to maintain aspect ratio while leaving space for labels
+                    img_width = Inches(11)  # Wider to accommodate larger text
+                    img_height = Inches(6.5)  # Taller to accommodate larger text
+                    
+                    # Center the image on the slide
+                    left = (prs.slide_width - img_width) / 2
+                    top = Inches(0.75)  # Move up slightly to fit larger chart
+                    pic = slide.shapes.add_picture(img_stream, left, top, width=img_width, height=img_height)
+                    plt.close(fig)
+
+            # Save presentation to BytesIO
             output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Basic Statistics
-                pd.DataFrame(self.basic_statistics()).to_excel(writer, sheet_name='Basic Statistics')
-                ws = writer.sheets['Basic Statistics']
-                ws.column_dimensions['A'].width = 25
-                ws.column_dimensions['B'].width = 15
-                
-                # Type Analysis if available
-                if self.has_type:
-                    type_analysis = self.type_analysis()
-                    if type_analysis is not None:
-                        type_analysis.to_excel(writer, sheet_name='Type Analysis')
-                        ws = writer.sheets['Type Analysis']
-                        ws.column_dimensions['A'].width = 30
-                        for col in ws.columns:
-                            if col[0].column_letter != 'A':
-                                ws.column_dimensions[col[0].column_letter].width = 15
-                
-                # Top Items
-                top = self.top_items(n=10)
-                if top is not None:
-                    top.to_excel(writer, sheet_name='Top Items')
-                    ws = writer.sheets['Top Items']
-                    ws.column_dimensions['A'].width = 35
-                    for col in ws.columns:
-                        if col[0].column_letter != 'A':
-                            ws.column_dimensions[col[0].column_letter].width = 15
-
-                # Monthly Analysis
-                if self.has_date:
-                    try:
-                        # Convert to datetime if not already
-                        if not pd.api.types.is_datetime64_any_dtype(self.df['Date']):
-                            self.df['Date'] = pd.to_datetime(self.df['Date'])
-                        
-                        # Create monthly summary
-                        monthly_data = self.df.set_index('Date').resample('M').agg({
-                            'Price': 'sum',
-                            'Item': 'count'
-                        }).reset_index()
-                        
-                        # Create Monthly Trends sheet with chart
-                        monthly_data.to_excel(writer, sheet_name='Monthly Trends', index=False)
-                        ws = writer.sheets['Monthly Trends']
-                        ws.column_dimensions['A'].width = 20
-                        ws.column_dimensions['B'].width = 15
-                        ws.column_dimensions['C'].width = 15
-                        
-                        # Create chart
-                        from openpyxl.chart import LineChart, Reference
-                        chart = LineChart()
-                        chart.title = "Monthly Revenue Trends"
-                        chart.y_axis.title = "Revenue ($)"
-                        chart.x_axis.title = "Month"
-                        
-                        data = Reference(ws, min_col=2, min_row=1, max_row=len(monthly_data)+1, max_col=2)
-                        cats = Reference(ws, min_col=1, min_row=2, max_row=len(monthly_data)+1)
-                        
-                        chart.add_data(data, titles_from_data=True)
-                        chart.set_categories(cats)
-                        ws.add_chart(chart, "E2")
-                        
-                        # Create detailed monthly sheets
-                        from openpyxl.chart import LineChart, Reference
-                        
-                        for name, group in self.df.groupby(self.df['Date'].dt.strftime('%Y-%m')):
-                            sheet_name = f"Month_{name}"
-                            # Group by item and calculate stats
-                            monthly_items = group.groupby('Item').agg({
-                                'Price': ['sum', 'mean', 'count']
-                            }).round(2)
-                            monthly_items.columns = ['Total Revenue', 'Average Price', 'Number of Sales']
-                            monthly_items = monthly_items.sort_values('Total Revenue', ascending=False)
-                            
-                            monthly_items.to_excel(writer, sheet_name=sheet_name)
-                            ws = writer.sheets[sheet_name]
-                            ws.column_dimensions['A'].width = 35
-                            for col in ws.columns:
-                                if col[0].column_letter != 'A':
-                                    ws.column_dimensions[col[0].column_letter].width = 15
-                            
-                            # Add conditional formatting to highlight top performers
-                            from openpyxl.styles import PatternFill
-                            green_fill = PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
-                            yellow_fill = PatternFill(start_color='FFD700', end_color='FFD700', fill_type='solid')
-                            
-                            # Highlight top 3 revenue items
-                            for i in range(2, min(5, len(monthly_items) + 2)):
-                                for j in range(1, 5):
-                                    cell = ws.cell(row=i, column=j)
-                                    if i == 2:
-                                        cell.fill = green_fill
-                                    elif i == 3 or i == 4:
-                                        cell.fill = yellow_fill
-                            
-                            # Create comparison line chart for each month
-                            chart = LineChart()
-                            chart.title = f"Revenue vs Quantity - {name}"
-                            chart.style = 10
-                            chart.y_axis.title = "Revenue ($) / Quantity"
-                            chart.x_axis.title = "Items"
-                            
-                            # Get top 10 items by revenue for the chart
-                            top_10_items = monthly_items.head(10)
-                            
-                            # Add revenue data
-                            revenue_data = Reference(ws, min_col=2, min_row=1, max_row=len(top_10_items)+1, max_col=2)
-                            cats = Reference(ws, min_col=1, min_row=2, max_row=len(top_10_items)+1)
-                            chart.add_data(revenue_data, titles_from_data=True)
-                            
-                            # Add quantity data
-                            quantity_data = Reference(ws, min_col=4, min_row=1, max_row=len(top_10_items)+1, max_col=4)
-                            chart.add_data(quantity_data, titles_from_data=True)
-                            
-                            # Customize line chart
-                            chart.set_categories(cats)
-                            chart.height = 15  # Height in cm
-                            chart.width = 25   # Width in cm
-                            
-                            # Configure legend position
-                            chart.legend.position = 'r'
-                            
-                            # Make lines more visible
-                            for series in chart.series:
-                                series.smooth = True  # Make lines smooth
-                                series.marker.symbol = "circle"  # Add markers
-                                series.marker.size = 8  # Make markers visible
-                            
-                            # Position the chart below the data
-                            ws.add_chart(chart, f"A{len(monthly_items) + 5}")
-                                        
-                    except Exception as e:
-                        st.warning(f"Could not create monthly analysis: {str(e)}")
-                        
+            prs.save(output)
             output.seek(0)
             return output
+
         except Exception as e:
-            st.error(f"Error generating Excel report: {str(e)}")
+            st.error(f"Error generating presentation: {str(e)}")
             return None
 
-# Streamlit UI
-st.set_page_config(page_title="Flexible Data Analyzer", layout="wide")
-st.title("📊 Data Analysis Dashboard")
+def main():
+    st.set_page_config(page_title="Flexible Data Analyzer", layout="wide")
+    st.title("📊 Data Analysis Dashboard")
 
-uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx", "xlsb"])
 
-if uploaded_file:
+    if not uploaded_file:
+        st.info("Please upload an Excel file to begin analysis.")
+        return
+
     try:
-        df = pd.read_excel(uploaded_file, engine="openpyxl")
-        st.write("Preview of uploaded data:")
-        st.dataframe(df.head())
-
-        # Filter out index-like columns
-        valid_columns = [col for col in df.columns if not (
-            col == "Unnamed: 0" or 
-            col == "index" or 
-            str(col).isdigit() or 
-            str(col).startswith('Unnamed:')
-        )]
-
-        st.info("Map your columns to the required fields:")
+        # Get file size and show info
+        file_size = uploaded_file.size / (1024 * 1024)  # Convert to MB
+        st.info(f"File size: {file_size:.2f} MB")
         
-        # Required columns
-        item_col = st.selectbox("Select the Item column (required)", valid_columns, key="item_col")
-        price_col = st.selectbox("Select the Price column (required)", valid_columns, key="price_col")
+        if file_size > 100:  # If file is larger than 100MB
+            st.warning("Large file detected. Processing may take a few moments...")
         
-        # Optional columns
-        date_col = st.selectbox("Select the Date column (optional)", ["None"] + valid_columns, key="date_col")
-        type_col = st.selectbox("Select the Type column (optional)", ["None"] + valid_columns, key="type_col")
-
-        if item_col and price_col:  # Required columns are selected
-            # Rename columns for internal use
-            col_map = {
-                item_col: 'Item',
-                price_col: 'Price'
-            }
+        # Create tabs for overall analysis and sheet-wise analysis
+        tab1, tab2 = st.tabs(["Overall Analysis", "Sheet-wise Analysis"])
+        
+        # Dictionary to store all dataframes
+        all_dfs = {}
+        combined_df = pd.DataFrame()
+        
+        # Read all sheets with progress indication
+        with st.spinner('Loading Excel sheets...'):
+            xls = pd.ExcelFile(uploaded_file, engine='openpyxl' if uploaded_file.name.endswith('.xlsx') else 'pyxlsb')
+            progress_bar = st.progress(0)
             
-            if date_col != "None":
-                col_map[date_col] = 'Date'
-            if type_col != "None":
-                col_map[type_col] = 'Type'
-                
-            df_renamed = df.rename(columns=col_map)
+            for idx, sheet in enumerate(xls.sheet_names):
+                df = load_excel_sheet(xls, sheet)
+                if df is not None:
+                    all_dfs[sheet] = df
+                    combined_df = pd.concat([combined_df, df], ignore_index=True)
+                progress_bar.progress((idx + 1) / len(xls.sheet_names))
+            
+            progress_bar.empty()
+        
+        # Free up memory
+        gc.collect()
 
-            # Try to parse date if present
-            if 'Date' in df_renamed.columns:
+        # Initialize column mapping dictionary at a higher scope
+        col_map = {}
+        
+        def process_tab1():
+            nonlocal col_map
+            st.subheader("Overall Analysis")
+            st.info("Map your columns to the required fields:")
+            columns = combined_df.columns.tolist()
+            
+            # Required columns
+            st.warning("Please ensure you select the correct Price column. This is required for the analysis.")
+            price_col = st.selectbox("Select the Price column (required)", [""] + columns, key="price_col")
+            item_col = st.selectbox("Select the Item column (required)", [""] + columns, key="item_col")
+            
+            if not price_col:
+                st.error("Please select a Price column to continue with the analysis.")
+                return
+            
+            if not item_col:
+                st.error("Please select an Item column to continue with the analysis.")
+                return
+            
+            # Optional columns
+            st.info("The following columns are optional:")
+            source_col = st.selectbox("Select the Source of Scan column (optional)", ["None"] + columns, key="source_col")
+            status_col = st.selectbox("Select the Old/New Status column (optional)", ["None"] + columns, key="status_col")
+            trans_status_col = st.selectbox("Select the Transaction Status column (optional)", ["None"] + columns, key="trans_status_col")
+            payment_col = st.selectbox("Select the Payment Mode column (optional)", ["None"] + columns, key="payment_col")
+            product_name_col = st.selectbox("Select the Product Name column (optional)", ["None"] + columns, key="product_name_col")
+            quantity_col = st.selectbox("Select the Quantity column (optional)", ["None"] + columns, key="quantity_col")
+
+            if price_col and item_col:
                 try:
-                    df_renamed['Date'] = pd.to_datetime(df_renamed['Date'])
+                    # Update the column mapping
+                    col_map.clear()
+                    col_map.update({
+                        item_col: 'Item',
+                        price_col: 'Price'
+                    })
+                    
+                    if source_col != "None":
+                        col_map[source_col] = 'Source'
+                    if status_col != "None":
+                        col_map[status_col] = 'Status'
+                    if trans_status_col != "None":
+                        col_map[trans_status_col] = 'Transaction_Status'
+                    if payment_col != "None":
+                        col_map[payment_col] = 'Payment_Mode'
+                    if product_name_col != "None":
+                        col_map[product_name_col] = 'Product_Name'
+                    if quantity_col != "None":
+                        col_map[quantity_col] = 'Quantity'
+                    
+                    # Verify the Price column contains numeric data
+                    try:
+                        test_price = pd.to_numeric(combined_df[price_col], errors='coerce')
+                        if test_price.isna().all():
+                            st.error(f"The selected Price column '{price_col}' does not contain any valid numeric values. Please select a different column.")
+                            return
+                    except Exception as e:
+                        st.error(f"Error validating Price column: {str(e)}")
+                        return
+                    
+                    df_renamed = combined_df.rename(columns=col_map)
+                    
+                    # If quantity is not provided, default to 1 for each row
+                    if 'Quantity' not in df_renamed.columns:
+                        df_renamed['Quantity'] = 1
+                    
+                    analyzer = FlexibleDataAnalysis(df_renamed)
+                    
+                    # Basic statistics
+                    st.subheader("Basic Statistics")
+                    stats = analyzer.basic_statistics()
+                    if stats is not None:
+                        st.table(stats)
+                    
+                    # Generate and offer PowerPoint download
+                    st.subheader("Download PowerPoint Presentation")
+                    st.info("The PowerPoint presentation includes basic statistics and distribution charts.")
+                    pptx = analyzer.generate_presentation()
+                    if pptx is not None:
+                        st.download_button(
+                            label="Download Analysis PowerPoint",
+                            data=pptx,
+                            file_name="analysis_presentation.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        )
                 except Exception as e:
-                    st.warning(f"Could not parse Date column: {str(e)}")
-
-            analyzer = FlexibleDataAnalysis(df_renamed)
-            st.success("Data loaded successfully!")
+                    st.error(f"Error processing data: {str(e)}")
+        
+        def process_tab2():
+            if not col_map:
+                st.warning("Please select columns in the Overall Analysis tab first.")
+                return
+                
+            st.subheader("Sheet-wise Analysis")
+            selected_sheet = st.selectbox("Select sheet to view detailed analysis", xls.sheet_names)
             
-            st.subheader("Basic Statistics")
-            stats = analyzer.basic_statistics()
-            if stats is not None:
-                st.table(stats)
+            if selected_sheet:
+                df = all_dfs[selected_sheet]
+                df_renamed = df.rename(columns=col_map)
+                
+                if 'Quantity' not in df_renamed.columns:
+                    df_renamed['Quantity'] = 1
+                
+                sheet_analyzer = FlexibleDataAnalysis(df_renamed)
+                
+                # Basic statistics for the sheet
+                st.subheader("Basic Statistics")
+                sheet_stats = sheet_analyzer.basic_statistics()
+                if sheet_stats is not None:
+                    st.table(sheet_stats)
+                
+                # Generate and offer PowerPoint download for individual sheet
+                st.subheader("Download PowerPoint Presentation")
+                st.info("The PowerPoint presentation includes basic statistics and distribution charts.")
+                sheet_pptx = sheet_analyzer.generate_presentation(f"Data Analysis Report - {selected_sheet}")
+                if sheet_pptx is not None:
+                    st.download_button(
+                        label=f"Download Analysis PowerPoint - {selected_sheet}",
+                        data=sheet_pptx,
+                        file_name=f"analysis_presentation_{selected_sheet}.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+        
+        with tab1:
+            process_tab1()
+        
+        with tab2:
+            process_tab2()
             
-            if analyzer.has_type:
-                st.subheader("Analysis by Type")
-                type_analysis = analyzer.type_analysis()
-                if type_analysis is not None:
-                    st.dataframe(type_analysis)
-            
-            if analyzer.has_date:
-                st.subheader("Time Trends")
-                fig = analyzer.time_trends()
-                if fig is not None:
-                    st.pyplot(fig)
-            
-            st.subheader("Top 10 Items by Revenue")
-            top_items = analyzer.top_items()
-            if top_items is not None:
-                st.dataframe(top_items)
-            
-            st.subheader("Download Excel Report")
-            excel_report = analyzer.generate_excel_report()
-            if excel_report is not None:
-                st.download_button(
-                    label="Download Analysis Excel Report",
-                    data=excel_report,
-                    file_name="analysis_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        else:
-            st.warning("Please select the required Item and Price columns to begin analysis.")
     except Exception as e:
         st.error(f"Error processing file: {str(e)}")
-else:
-    st.info("Please upload an Excel file to begin analysis.")
+
+if __name__ == "__main__":
+    main()
 
