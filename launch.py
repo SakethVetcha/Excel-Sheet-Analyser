@@ -83,18 +83,10 @@ class FlexibleDataAnalysis:
         if column not in self.df.columns:
             return None
         
-        # Debug information
-        st.write("Debug - Unique values in column before processing:")
-        st.write(self.df[column].unique())
-        
         plt.figure(figsize=(15, 10))  # Increased figure size
         
         # Get value counts (data should already be lowercase from initialization)
         data = self.df[column].value_counts()
-        
-        # Debug information
-        st.write("Debug - Value counts:")
-        st.write(data)
         
         # If too many categories, group small ones into "Others"
         if len(data) > 15:
@@ -129,7 +121,7 @@ class FlexibleDataAnalysis:
         # Create custom legend with color boxes
         legend_elements = []
         for i, (label, percentage) in enumerate(zip(data.index, percentages)):
-            legend_elements.append(plt.Rectangle((0, 0), 1, 1, fc=colors[i], label=f'{label} ({percentage:.1f}%)'))
+            legend_elements.append(plt.Rectangle((0, 0), 1, 1, fc=colors[i], label=f'{label} ({percentage:.3f}%)'))
         
         # Add legend with color boxes
         plt.legend(
@@ -329,12 +321,12 @@ class FlexibleDataAnalysis:
                     img_stream.seek(0)
                     
                     # Calculate dimensions to maintain aspect ratio while leaving space for labels
-                    img_width = Inches(11)  # Wider to accommodate larger text
-                    img_height = Inches(6.5)  # Taller to accommodate larger text
+                    img_width=prs.slide_width
+                    img_height=prs.slide_height
                     
-                    # Center the image on the slide
-                    left = (prs.slide_width - img_width) / 2
-                    top = Inches(0.75)  # Move up slightly to fit larger chart
+                    # Cover entire page
+                    left = 0
+                    top = 0 
                     pic = slide.shapes.add_picture(img_stream, left, top, width=img_width, height=img_height)
                     plt.close(fig)
 

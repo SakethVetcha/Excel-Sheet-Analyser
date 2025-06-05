@@ -1,6 +1,6 @@
 # Amazon Store Sales Analysis Tool
 
-This tool helps analyze sales data from your Amazon store and generates comprehensive reports and visualizations.
+This tool helps analyze data from Excel Files and generates comprehensive visualizations in PowerPoint.
 
 ## Setup
 
@@ -25,18 +25,4 @@ python amazon_sales_analysis.py
 ## Output
 
 The tool will generate:
-1. A comprehensive Excel report ('sales_analysis_report.xlsx') containing:
-   - Basic Statistics
-   - Category Analysis
-   - Top Products
-   - Monthly Trends
-2. A visualization of monthly sales trends ('monthly_sales_trend.png')
-
-## Features
-
-- Basic sales statistics (total, average, highest, lowest sales)
-- Category-wise analysis
-- Monthly sales trends
-- Top performing products
-- Comprehensive Excel report generation
-- Sales visualization 
+Pie charts of data required into PowerPoint
