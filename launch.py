@@ -46,7 +46,7 @@ def load_excel_sheet(_file, sheet_name):
 
 class FlexibleDataAnalysis:
     def __init__(self, df):
-        self.df = df
+        self.df = df.copy()  # Create a copy to avoid modifying original data
         
         self.has_type = 'Type' in df.columns
         self.has_price = 'Price' in df.columns
@@ -56,10 +56,10 @@ class FlexibleDataAnalysis:
             st.error("Error: 'Price' column is missing in the data. Please ensure you've selected the correct Price column.")
             return
             
-        # Convert all string columns to lowercase
-        for col in self.df.columns:
-            if self.df[col].dtype == 'object':
-                self.df[col] = self.df[col].str.lower()
+        # Convert all string/object columns to lowercase and strip whitespace
+        object_columns = self.df.select_dtypes(include=['object']).columns
+        for col in object_columns:
+            self.df[col] = self.df[col].astype(str).str.lower().str.strip()
             
         # Convert Price and Quantity columns with memory optimization
         if self.has_price:
@@ -68,7 +68,6 @@ class FlexibleDataAnalysis:
         if self.has_quantity:
             self.df['Quantity'] = pd.to_numeric(self.df['Quantity'], errors='coerce', downcast='integer')
         else:
-            # If no Quantity column, default to 1
             self.df['Quantity'] = 1
             self.has_quantity = True
         
@@ -84,10 +83,18 @@ class FlexibleDataAnalysis:
         if column not in self.df.columns:
             return None
         
+        # Debug information
+        st.write("Debug - Unique values in column before processing:")
+        st.write(self.df[column].unique())
+        
         plt.figure(figsize=(15, 10))  # Increased figure size
         
-        # Convert the column values to lowercase and then get value counts
-        data = self.df[column].str.lower().value_counts()
+        # Get value counts (data should already be lowercase from initialization)
+        data = self.df[column].value_counts()
+        
+        # Debug information
+        st.write("Debug - Value counts:")
+        st.write(data)
         
         # If too many categories, group small ones into "Others"
         if len(data) > 15:
