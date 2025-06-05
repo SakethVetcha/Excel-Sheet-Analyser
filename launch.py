@@ -56,6 +56,11 @@ class FlexibleDataAnalysis:
             st.error("Error: 'Price' column is missing in the data. Please ensure you've selected the correct Price column.")
             return
             
+        # Convert all string columns to lowercase
+        for col in self.df.columns:
+            if self.df[col].dtype == 'object':
+                self.df[col] = self.df[col].str.lower()
+            
         # Convert Price and Quantity columns with memory optimization
         if self.has_price:
             self.df['Price'] = pd.to_numeric(self.df['Price'], errors='coerce', downcast='float')
@@ -89,94 +94,48 @@ class FlexibleDataAnalysis:
             if other_mask.any():
                 other_sum = data[other_mask].sum()
                 data = data[~other_mask]
-                data['Others'] = other_sum
+                data['others'] = other_sum
         
-        # Sort values in descending order for better label placement
+        # Sort values in descending order
         data = data.sort_values(ascending=False)
         
         # Calculate percentages
         total = data.sum()
         percentages = [(val/total)*100 for val in data.values]
         
-        # Create pie chart without labels first
-        explode = [0.05] * len(data)  # Slight explosion for all segments
-        wedges, _ = plt.pie(
+        # Generate colors using a color map
+        colors = plt.cm.Set3(np.linspace(0, 1, len(data)))
+        
+        # Create pie chart
+        plt.pie(
             data.values,
-            explode=explode,
-            labels=None,  # No direct labels
-            autopct=None,  # No direct percentage labels
+            labels=None,
+            colors=colors,
             startangle=90,
-            radius=1.5,
+            radius=1.2,
             counterclock=False,
             wedgeprops={'linewidth': 2, 'edgecolor': 'white'}
         )
         
-        # Create legend-style labels with arrows
-        bbox_props = dict(boxstyle="round,pad=0.5", fc="w", ec="gray", alpha=0.9)
-        # Get angles for each wedge
-        angles = []
-        for i, wedge in enumerate(wedges):
-            theta1, theta2 = wedge.theta1, wedge.theta2
-            # Get the middle angle in radians for the wedge
-            angle = np.deg2rad((theta1 + theta2)/2)
-            angles.append(angle)
+        # Create custom legend with color boxes
+        legend_elements = []
+        for i, (label, percentage) in enumerate(zip(data.index, percentages)):
+            legend_elements.append(plt.Rectangle((0, 0), 1, 1, fc=colors[i], label=f'{label} ({percentage:.1f}%)'))
         
-        # Organize labels in left and right columns
-        left_labels = []
-        right_labels = []
-        
-        for i, (wedge, pct, angle) in enumerate(zip(wedges, percentages, angles)):
-            # Determine which side to place the label
-            if -np.pi/2 <= angle <= np.pi/2:
-                right_labels.append((i, wedge, pct, angle))
-            else:
-                left_labels.append((i, wedge, pct, angle))
-        
-        # Sort labels by y-coordinate
-        left_labels.sort(key=lambda x: np.sin(x[3]), reverse=True)
-        right_labels.sort(key=lambda x: np.sin(x[3]), reverse=True)
-        
-        # Place labels with appropriate spacing
-        def place_labels(labels, side='left'):
-            spacing = 2.0 / (len(labels) + 1) if labels else 1  # Dynamic spacing
-            for idx, (i, wedge, pct, angle) in enumerate(labels):
-                # Calculate label position
-                if side == 'left':
-                    x = -2.5  # Fixed x for left side
-                    y = 1.0 - (idx + 1) * spacing  # Evenly spaced y coordinates
-                else:
-                    x = 2.5  # Fixed x for right side
-                    y = 1.0 - (idx + 1) * spacing
-                
-                # Calculate the arrow start position using radius and explode
-                radius = 1.5
-                explode_val = explode[i] if 'explode' in locals() else 0
-                start_x = np.cos(angle) * (radius + explode_val)
-                start_y = np.sin(angle) * (radius + explode_val)
-                
-                # Create the label text
-                label = f"{data.index[i]}\n{pct:.1f}%"
-                
-                # Add arrow and label
-                plt.annotate(
-                    label,
-                    xy=(start_x, start_y),  # Arrow start (wedge)
-                    xytext=(x, y),  # Label position
-                    size=14,
-                    ha='right' if side == 'left' else 'left',
-                    va='center',
-                    bbox=bbox_props,
-                    arrowprops=dict(
-                        arrowstyle="->",
-                        connectionstyle="arc3,rad=0.2",
-                        color='gray',
-                        lw=2
-                    )
-                )
-        
-        # Place labels on both sides
-        place_labels(left_labels, 'left')
-        place_labels(right_labels, 'right')
+        # Add legend with color boxes
+        plt.legend(
+            handles=legend_elements,
+            loc='center left',
+            bbox_to_anchor=(1.1, 0.5),
+            fontsize=12,
+            title='Categories',
+            title_fontsize=14,
+            frameon=True,
+            facecolor='white',
+            edgecolor='gray',
+            framealpha=0.9,
+            borderpad=1
+        )
         
         # Add title with padding
         plt.title(title, pad=20, size=18, weight='bold')
