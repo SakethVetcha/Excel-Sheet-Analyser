@@ -85,7 +85,9 @@ class FlexibleDataAnalysis:
             return None
         
         plt.figure(figsize=(15, 10))  # Increased figure size
-        data = self.df[column].value_counts()
+        
+        # Convert the column values to lowercase and then get value counts
+        data = self.df[column].str.lower().value_counts()
         
         # If too many categories, group small ones into "Others"
         if len(data) > 15:
